@@ -1,0 +1,341 @@
+import { useState, useEffect, FormEvent } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  Copy,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Wand2
+} from "lucide-react";
+import { useAuthStore } from "../../stores/authStore";
+import { useChannelStore } from "../../stores/channelStore";
+import {
+  generateShortScript,
+  type GeneratedScript
+} from "../../services/openaiScriptGenerator";
+import type { Channel } from "../../domain/channel";
+
+const ScriptGenerationPage = () => {
+  const { channelId } = useParams<{ channelId: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuthStore((state) => ({ user: state.user }));
+  const { channels, fetchChannels } = useChannelStore((state) => ({
+    channels: state.channels,
+    fetchChannels: state.fetchChannels
+  }));
+
+  const [channel, setChannel] = useState<Channel | null>(null);
+  const [idea, setIdea] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [script, setScript] = useState<GeneratedScript | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid || !channelId) {
+      navigate("/channels", { replace: true });
+      return;
+    }
+
+    const loadChannel = async () => {
+      try {
+        await fetchChannels(user.uid);
+        const found = channels.find((c) => c.id === channelId);
+        if (found) {
+          setChannel(found);
+        } else {
+          setError("Канал не найден");
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Ошибка при загрузке канала"
+        );
+      }
+    };
+
+    void loadChannel();
+  }, [user?.uid, channelId, navigate, fetchChannels]);
+
+  useEffect(() => {
+    if (channels.length > 0 && channelId) {
+      const found = channels.find((c) => c.id === channelId);
+      if (found) {
+        setChannel(found);
+      }
+    }
+  }, [channels, channelId]);
+
+  const handleGenerate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!channel || !idea.trim()) {
+      setError("Введите идею для сценария");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setScript(null);
+
+    try {
+      const result = await generateShortScript(channel, idea.trim());
+      setScript(result);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Ошибка при генерации сценария. Проверьте настройки OpenAI API."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!script) return;
+
+    const textToCopy = `СЦЕНАРИЙ ДЛЯ ${channel?.name || "ВИДЕО"}
+
+ЗАВЯЗКА (0-3 сек):
+${script.sections.hook || "—"}
+
+ОСНОВНОЕ ДЕЙСТВИЕ:
+${script.sections.mainAction || "—"}
+
+ФИНАЛ:
+${script.sections.finale || "—"}
+
+ТЕКСТ НА ЭКРАНЕ:
+${script.sections.onScreenText || "—"}
+
+РЕПЛИКИ/ГОЛОС ЗА КАДРОМ:
+${script.sections.voiceover || "—"}
+
+ЗВУКИ/МУЗЫКА:
+${script.sections.sounds || "—"}`;
+
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setError("Не удалось скопировать в буфер обмена");
+    }
+  };
+
+  const handleRegenerate = () => {
+    setScript(null);
+    setError(null);
+  };
+
+  if (!channel) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white">
+        <div className="max-w-xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/60 p-8 text-center">
+          {error ? (
+            <>
+              <h1 className="text-2xl font-semibold text-red-200">
+                Ошибка загрузки
+              </h1>
+              <p className="text-red-300">{error}</p>
+            </>
+          ) : (
+            <>
+              <Loader2 className="mx-auto h-8 w-8 animate-spin text-brand-light" />
+              <p className="text-slate-300">Загрузка канала...</p>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate("/channels")}
+            className="mt-4 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark"
+          >
+            Вернуться к списку
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 px-4 py-10 text-white">
+      <div className="mx-auto w-full max-w-4xl">
+        <div className="mb-8 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => navigate("/channels")}
+            className="rounded-xl border border-white/10 bg-slate-900/60 px-4 py-2 text-sm text-slate-300 transition hover:border-brand/40 hover:text-white"
+          >
+            <ArrowLeft size={16} className="inline mr-2" />
+            Назад
+          </button>
+          <div className="flex items-center gap-2">
+            <Sparkles size={20} className="text-brand-light" />
+            <h1 className="text-2xl font-semibold">Генерация сценария</h1>
+          </div>
+        </div>
+
+        <div className="mb-6 rounded-2xl border border-white/10 bg-slate-900/60 p-6">
+          <h2 className="mb-2 text-lg font-semibold">{channel.name}</h2>
+          <div className="flex flex-wrap gap-4 text-sm text-slate-300">
+            <span>Платформа: {channel.platform}</span>
+            <span>•</span>
+            <span>Длительность: {channel.targetDurationSec} сек</span>
+            <span>•</span>
+            <span>Язык: {channel.language}</span>
+            <span>•</span>
+            <span>Тон: {channel.tone}</span>
+          </div>
+        </div>
+
+        {!script && (
+          <form onSubmit={handleGenerate} className="mb-8">
+            <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-8 shadow-2xl shadow-brand/10">
+              <label className="mb-4 block text-sm font-medium text-slate-200">
+                О чём будет ролик?
+              </label>
+              <textarea
+                value={idea}
+                onChange={(e) => setIdea(e.target.value)}
+                placeholder="Например: Как быстро приготовить завтрак за 5 минут"
+                rows={4}
+                className="mb-4 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-brand focus:ring-2 focus:ring-brand/40"
+                disabled={loading}
+                required
+              />
+
+              {error && (
+                <div className="mb-4 rounded-lg border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || !idea.trim()}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-brand-dark"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Генерируем сценарий...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 size={18} />
+                    Сгенерировать сценарий
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {script && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 p-6">
+              <h2 className="text-xl font-semibold">Сгенерированный сценарий</h2>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2 text-sm text-slate-300 transition hover:border-brand/40 hover:text-white"
+                >
+                  <Copy size={16} />
+                  {copied ? "Скопировано!" : "Копировать"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRegenerate}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2 text-sm text-slate-300 transition hover:border-brand/40 hover:text-white"
+                >
+                  <RefreshCw size={16} />
+                  Сгенерировать ещё
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {script.sections.hook && (
+                <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-brand-light">
+                    🎣 Завязка (0-3 сек)
+                  </h3>
+                  <p className="text-slate-200 whitespace-pre-wrap">
+                    {script.sections.hook}
+                  </p>
+                </div>
+              )}
+
+              {script.sections.mainAction && (
+                <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-brand-light">
+                    🎬 Основное действие
+                  </h3>
+                  <p className="text-slate-200 whitespace-pre-wrap">
+                    {script.sections.mainAction}
+                  </p>
+                </div>
+              )}
+
+              {script.sections.finale && (
+                <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-brand-light">
+                    🎯 Финал
+                  </h3>
+                  <p className="text-slate-200 whitespace-pre-wrap">
+                    {script.sections.finale}
+                  </p>
+                </div>
+              )}
+
+              {script.sections.onScreenText && (
+                <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-brand-light">
+                    📝 Текст на экране
+                  </h3>
+                  <p className="text-slate-200 whitespace-pre-wrap">
+                    {script.sections.onScreenText}
+                  </p>
+                </div>
+              )}
+
+              {script.sections.voiceover && (
+                <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-brand-light">
+                    🎤 Реплики / Голос за кадром
+                  </h3>
+                  <p className="text-slate-200 whitespace-pre-wrap">
+                    {script.sections.voiceover}
+                  </p>
+                </div>
+              )}
+
+              {script.sections.sounds && (
+                <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-brand-light">
+                    🔊 Звуки / Музыка
+                  </h3>
+                  <p className="text-slate-200 whitespace-pre-wrap">
+                    {script.sections.sounds}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-slate-900/60 p-6">
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-400">
+                Исходный JSON
+              </h3>
+              <pre className="overflow-x-auto rounded-lg bg-slate-950/60 p-4 text-xs text-slate-300">
+                {script.rawText}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default ScriptGenerationPage;
