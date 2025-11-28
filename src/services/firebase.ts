@@ -37,6 +37,31 @@ const firebaseConfig = {
   appId: requiredEnvVars.appId
 };
 
+// Проверка валидности конфигурации перед инициализацией
+const configErrors: string[] = [];
+
+if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "your-api-key-here") {
+  configErrors.push("VITE_FIREBASE_API_KEY не настроен или имеет значение по умолчанию");
+}
+if (!firebaseConfig.authDomain || !firebaseConfig.authDomain.includes("firebaseapp.com")) {
+  configErrors.push("VITE_FIREBASE_AUTH_DOMAIN должен быть в формате project-id.firebaseapp.com");
+}
+if (!firebaseConfig.projectId || firebaseConfig.projectId === "your-project-id") {
+  configErrors.push("VITE_FIREBASE_PROJECT_ID не настроен или имеет значение по умолчанию");
+}
+if (!firebaseConfig.appId || firebaseConfig.appId === "1:123456789012:web:abcdef123456") {
+  configErrors.push("VITE_FIREBASE_APP_ID не настроен или имеет значение по умолчанию");
+}
+
+if (configErrors.length > 0) {
+  console.error("❌ Ошибки конфигурации Firebase:");
+  configErrors.forEach((error) => console.error(`  - ${error}`));
+  console.error(
+    "💡 Проверьте файл .env и убедитесь, что все переменные заполнены правильными значениями из Firebase Console."
+  );
+  console.error("💡 См. инструкции в FIREBASE_SETUP.md");
+}
+
 // Отладочная информация (только в dev режиме)
 if (import.meta.env.DEV) {
   console.log("🔥 Firebase конфигурация:", {
@@ -44,12 +69,34 @@ if (import.meta.env.DEV) {
     authDomain: firebaseConfig.authDomain,
     apiKey: firebaseConfig.apiKey
       ? `${firebaseConfig.apiKey.substring(0, 10)}...`
-      : "❌ НЕ НАЙДЕН"
+      : "❌ НЕ НАЙДЕН",
+    appId: firebaseConfig.appId ? `${firebaseConfig.appId.substring(0, 20)}...` : "❌ НЕ НАЙДЕН",
+    hasAllConfig: !configErrors.length
   });
 }
 
-const app = initializeApp(firebaseConfig);
+let app;
+let auth: Auth;
+let db: Firestore;
 
-export const auth: Auth = getAuth(app);
-export const db: Firestore = getFirestore(app);
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+
+  if (import.meta.env.DEV) {
+    console.log("✅ Firebase успешно инициализирован");
+  }
+} catch (error) {
+  console.error("❌ Ошибка инициализации Firebase:", error);
+  if (error instanceof Error) {
+    console.error("   Сообщение:", error.message);
+  }
+  console.error(
+    "💡 Проверьте правильность всех значений в .env файле и убедитесь, что Firebase проект активен."
+  );
+  throw error;
+}
+
+export { auth, db };
 
